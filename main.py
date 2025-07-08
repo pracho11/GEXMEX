@@ -5,7 +5,7 @@ Gamma Edge - Advanced Options Analysis Telegram Bot
 ===================================================
 
 Professional-grade options analysis tool leveraging Upstox API for real-time market data.
-Features: Gamma Exposure Analysis, Confluence Scanner, Real-time Monitoring, Advanced Greeks
+Features: Gamma Exposure Analysis, Real-time Monitoring, Advanced Greeks
 
 Author: Gamma Edge Team
 Date: January 2025
@@ -85,6 +85,9 @@ class GammaEdgeCalculator:
             self.session.headers.update({
                 'Authorization': f'Bearer {self.access_token}'
             })
+
+        if self.use_live_data:
+            self._verify_credentials()
         
         # Log initialization status
         logger.info("🔧 Initializing Gamma Edge Calculator...")
@@ -135,6 +138,24 @@ class GammaEdgeCalculator:
             'M&M': 'NSE_EQ|INE101A01026',
             'TATAMOTORS': 'NSE_EQ|INE155A01022',
         }
+
+    def _verify_credentials(self) -> None:
+        """Check if the provided Upstox token is valid."""
+        try:
+            url = f"{self.base_url}/market-quote/indices"
+            resp = self.session.get(url, timeout=10)
+            if resp.status_code == 401:
+                logger.error("❌ Upstox authentication failed. Invalid or expired token.")
+                logger.error("Please regenerate UPSTOX_ACCESS_TOKEN and update your environment.")
+                self.use_live_data = False
+            elif resp.status_code == 200:
+                logger.info("✓ Upstox authentication verified")
+            else:
+                logger.warning(
+                    f"Unexpected response while verifying credentials: {resp.status_code}"
+                )
+        except Exception as e:
+            logger.error(f"Error verifying Upstox credentials: {e}")
     
     def _get_cache_key(self, method: str, symbol: str) -> str:
         """Generate cache key for API calls"""
@@ -200,7 +221,17 @@ class GammaEdgeCalculator:
                     logger.error(f"API Error for {symbol}: {data.get('message', 'Unknown error')}")
                     return None
             else:
-                logger.error(f"HTTP Error {response.status_code} for {symbol}: {response.text}")
+                if response.status_code == 401:
+                    logger.error(
+                        f"Invalid or expired Upstox token while fetching {symbol}."
+                    )
+                    logger.error(
+                        "Please regenerate UPSTOX_ACCESS_TOKEN and update your environment variables."
+                    )
+                else:
+                    logger.error(
+                        f"HTTP Error {response.status_code} for {symbol}: {response.text}"
+                    )
                 return None
             
         except Exception as e:
@@ -238,7 +269,17 @@ class GammaEdgeCalculator:
                     logger.error(f"Options chain API Error for {symbol}: {data.get('message', 'Unknown error')}")
                     return None
             else:
-                logger.error(f"Options chain HTTP Error {response.status_code} for {symbol}: {response.text}")
+                if response.status_code == 401:
+                    logger.error(
+                        f"Invalid or expired Upstox token while fetching options for {symbol}."
+                    )
+                    logger.error(
+                        "Please regenerate UPSTOX_ACCESS_TOKEN and update your environment variables."
+                    )
+                else:
+                    logger.error(
+                        f"Options chain HTTP Error {response.status_code} for {symbol}: {response.text}"
+                    )
                 return None
                 
         except Exception as e:
@@ -442,65 +483,6 @@ class GammaEdgeCalculator:
             }
         }
     
-    def run_confluence_scan(self, strategy: str) -> List[Dict]:
-        """Run confluence scanner for different strategies"""
-        results = []
-        
-        # Sample stocks for scanning
-        scan_stocks = ['RELIANCE', 'HDFCBANK', 'INFY', 'TCS', 'ICICIBANK']
-        
-        for stock in scan_stocks:
-            stock_info = self.get_stock_info(stock)
-            if not stock_info:
-                continue
-            
-            current_price = stock_info['last_price']
-            
-            # Mock technical analysis
-            technical_strong = np.random.choice([True, False], p=[0.3, 0.7])  # 30% pass rate
-            
-            if technical_strong:
-                gamma_exposure = self.calculate_gamma_exposure(stock, current_price)
-                gamma_levels = self.find_gamma_levels(gamma_exposure, current_price)
-                
-                if strategy == 'uptrend_dip_buy':
-                    put_wall = gamma_levels.get('put_wall', {}).get('strike', current_price * 0.98)
-                    distance_to_put_wall = abs(current_price - put_wall) / current_price
-                    
-                    if distance_to_put_wall <= 0.005:  # Within 0.5%
-                        results.append({
-                            'symbol': stock,
-                            'spot': current_price,
-                            'key_level': put_wall,
-                            'level_type': 'Put Wall',
-                            'status': '🟢 Technically Strong, hitting major options support.'
-                        })
-                
-                elif strategy == 'bearish_breakdown':
-                    put_wall = gamma_levels.get('put_wall', {}).get('strike', current_price * 0.98)
-                    if current_price < put_wall:
-                        results.append({
-                            'symbol': stock,
-                            'spot': current_price,
-                            'key_level': put_wall,
-                            'level_type': 'Put Wall',
-                            'status': '🔴 Broke below Put Wall - Bearish breakdown setup.'
-                        })
-                
-                elif strategy == 'gamma_squeeze':
-                    call_wall = gamma_levels.get('call_wall', {}).get('strike', current_price * 1.02)
-                    distance_to_call_wall = abs(current_price - call_wall) / current_price
-                    
-                    if distance_to_call_wall <= 0.01:  # Within 1%
-                        results.append({
-                            'symbol': stock,
-                            'spot': current_price,
-                            'key_level': call_wall,
-                            'level_type': 'Call Wall',
-                            'status': '⚡ Approaching Call Wall - Potential gamma squeeze setup.'
-                        })
-        
-        return results[:3]  # Return top 3 results
 
 # Initialize calculator
 gamma_calculator = GammaEdgeCalculator()
@@ -511,7 +493,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send welcome message with main menu"""
     keyboard = [
         [InlineKeyboardButton("📊 Analyze GEX", callback_data="main_gex")],
-        [InlineKeyboardButton("🔍 Scan for Setups", callback_data="main_scan")],
         [InlineKeyboardButton("🔔 Setup Alerts", callback_data="main_monitor")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -523,7 +504,6 @@ I am **Gamma Edge**, your advanced market structure analysis assistant.
 
 **Main Features:**
 📊 `/gex` - Analyze Gamma Exposure for instruments
-🔍 `/scan` - Scan for high-probability setups  
 🔔 `/monitor` - Get real-time alerts on key levels
 
 **Choose an option below to begin:**
@@ -541,11 +521,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • Shows regime analysis (Positive/Negative Gamma)
 • Generates visual GEX profile charts
 • Provides advanced Greeks (Vanna & Charm)
-
-**🔍 Confluence Scanner (`/scan`):**
-• Uptrend Dip-Buy: Technical + Options support confluence
-• Bearish Breakdown: Stocks breaking key support levels
-• Gamma Squeeze: Stocks approaching major resistance
 
 **🔔 Real-time Monitoring (`/monitor`):**
 • Zero Gamma Cross alerts
@@ -575,19 +550,6 @@ async def gex_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=reply_markup
     )
 
-async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /scan command"""
-    keyboard = [
-        [InlineKeyboardButton("Bullish: Uptrend Dip-Buy", callback_data="scan_uptrend_dip_buy")],
-        [InlineKeyboardButton("Bearish: Breakdown Setup", callback_data="scan_bearish_breakdown")],
-        [InlineKeyboardButton("Momentum: Gamma Squeeze", callback_data="scan_gamma_squeeze")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "🔍 **Confluence Scanner**\n\nSelect a pre-built strategy:",
-        reply_markup=reply_markup
-    )
 
 async def monitor_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /monitor command"""
@@ -621,15 +583,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("📊 **GEX Analysis**\n\nSelect an instrument:", reply_markup=reply_markup)
-        return
-    elif data == "main_scan":
-        keyboard = [
-            [InlineKeyboardButton("Bullish: Uptrend Dip-Buy", callback_data="scan_uptrend_dip_buy")],
-            [InlineKeyboardButton("Bearish: Breakdown Setup", callback_data="scan_bearish_breakdown")],
-            [InlineKeyboardButton("Momentum: Gamma Squeeze", callback_data="scan_gamma_squeeze")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("🔍 **Confluence Scanner**\n\nSelect a pre-built strategy:", reply_markup=reply_markup)
         return
     elif data == "main_monitor":
         keyboard = [
@@ -670,11 +623,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await send_advanced_greeks(query, symbol)
         return
     
-    # Scanner callbacks
-    if data.startswith("scan_"):
-        strategy = data.replace("scan_", "")
-        await process_confluence_scan(query, strategy)
-        return
     
     # Monitor callbacks
     if data.startswith("monitor_"):
@@ -822,60 +770,6 @@ async def send_advanced_greeks(query, symbol: str) -> None:
     
     await query.message.reply_text(result_msg)
 
-async def process_confluence_scan(query, strategy: str) -> None:
-    """Process confluence scanner with detailed criteria explanation"""
-    await query.edit_message_text(f"🔍 **Running {strategy.replace('_', ' ').title()} Scan...**\n\n⚡ Scanning F&O stocks...")
-    
-    # Get scan criteria explanation
-    criteria_explanation = get_scan_criteria_explanation(strategy)
-    
-    results = gamma_calculator.run_confluence_scan(strategy)
-    
-    result_msg = f"🔍 **Scan Results: {strategy.replace('_', ' ').title()}**\n\n"
-    result_msg += f"**📋 Scan Criteria:**\n{criteria_explanation}\n\n"
-    
-    if not results:
-        result_msg += "❌ **No setups found matching the criteria.**\n\n"
-        result_msg += "**💡 What this means:**\n"
-        result_msg += "• No stocks currently meet all the technical and options flow requirements\n"
-        result_msg += "• Market conditions may not be favorable for this strategy\n"
-        result_msg += "• Try running the scan again during different market hours\n"
-    else:
-        result_msg += f"✅ **{len(results)} Setups Found:**\n\n"
-        
-        for i, result in enumerate(results, 1):
-            result_msg += f"**{i}. {result['symbol']}**\n"
-            result_msg += f"   `Spot: ₹{result['spot']:.0f} | {result['level_type']}: ₹{result['key_level']:.0f}`\n"
-            result_msg += f"   `{result['status']}`\n\n"
-    
-    await query.edit_message_text(result_msg)
-
-def get_scan_criteria_explanation(strategy: str) -> str:
-    """Get detailed explanation of scan criteria for each strategy"""
-    criteria = {
-        'uptrend_dip_buy': """
-• **Technical Filter:** Stock in clear uptrend (20 EMA > 50 EMA)
-• **Options Flow:** Price within 0.5% of major Put Wall support
-• **Volume:** Above average volume confirming interest
-• **Risk-Reward:** Clear resistance levels above for target setting
-• **Confluence:** Technical strength + Options support alignment""",
-        
-        'bearish_breakdown': """
-• **Technical Filter:** Stock showing weakness (Price < 20 EMA)
-• **Options Flow:** Price broken below major Put Wall support
-• **Volume:** Increased volume on breakdown confirming selling
-• **Momentum:** Negative gamma environment supporting further decline
-• **Confluence:** Technical breakdown + Options flow bearish alignment""",
-        
-        'gamma_squeeze': """
-• **Technical Filter:** Stock approaching resistance with momentum
-• **Options Flow:** Price within 1% of major Call Wall resistance
-• **Options Activity:** High Call OI creating potential squeeze setup
-• **Gamma Environment:** Positive gamma that could accelerate moves
-• **Confluence:** Technical breakout potential + Options squeeze mechanics"""
-    }
-    
-    return criteria.get(strategy, "Criteria not defined for this strategy.")
 
 async def setup_monitoring(query, symbol: str, user_id: int) -> None:
     """Setup monitoring for a symbol"""
@@ -931,7 +825,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"🎯 **Quick Actions:**\n"
             f"• Type `/start` for the main menu\n"
             f"• Type `/gex` for gamma analysis\n"
-            f"• Type `/scan` for confluence scanner\n"
             f"• Type `/monitor` for real-time alerts\n\n"
             f"Ready to analyze the markets! 📈"
         )
@@ -963,7 +856,6 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("gex", gex_command))
-    application.add_handler(CommandHandler("scan", scan_command))
     application.add_handler(CommandHandler("monitor", monitor_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
