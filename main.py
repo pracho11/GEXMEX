@@ -498,7 +498,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_msg = """
-🚀 **Welcome, Trader!**
+🚀 **Welcome, PraCho!**
 
 I am **Gamma Edge**, your advanced market structure analysis assistant.
 
